@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+httpx
+pymupdf
+psycopg2-binary
+qdrant-client
+openai>=1.0.0
+pydantic
