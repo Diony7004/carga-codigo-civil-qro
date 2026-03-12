@@ -11,6 +11,7 @@ import hashlib
 import logging
 import time
 import uuid
+from collections import deque
 from datetime import datetime
 from typing import Optional
 
@@ -27,9 +28,18 @@ from qdrant_client.models import (
 )
 from openai import OpenAI
 
-# ─── Logging ────────────────────────────────────────────────────────
+# ─── Logging con buffer en memoria ──────────────────────────────────
+log_buffer = deque(maxlen=500)  # últimos 500 mensajes
+
+class BufferHandler(logging.Handler):
+    def emit(self, record):
+        log_buffer.append(self.format(record))
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+buffer_handler = BufferHandler()
+buffer_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+logger.addHandler(buffer_handler)
 
 # ─── Config ─────────────────────────────────────────────────────────
 API_KEY = os.environ.get("API_KEY", "")
@@ -603,6 +613,59 @@ def stats(x_api_key: str = Header(default="")):
         result["qdrant"]["error"] = str(e)
 
     return result
+
+
+@app.get("/diag")
+def diagnostics(x_api_key: str = Header(default="")):
+    """Diagnóstico de conexiones individuales."""
+    verify_api_key(x_api_key)
+    results = {}
+
+    # Test PostgreSQL
+    try:
+        conn = get_pg_connection()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        conn.close()
+        results["postgres"] = {"status": "ok"}
+    except Exception as e:
+        results["postgres"] = {"status": "error", "detail": str(e)}
+
+    # Test Qdrant
+    try:
+        client = get_qdrant_client()
+        cols = client.get_collections()
+        results["qdrant"] = {"status": "ok", "collections": [c.name for c in cols.collections]}
+    except Exception as e:
+        results["qdrant"] = {"status": "error", "detail": str(e)}
+
+    # Test OpenAI/OpenRouter
+    try:
+        client_kwargs = {"api_key": OPENAI_API_KEY}
+        if OPENAI_BASE_URL:
+            client_kwargs["base_url"] = OPENAI_BASE_URL
+        client = OpenAI(**client_kwargs)
+        resp = client.embeddings.create(input=["test"], model=EMBEDDING_MODEL)
+        results["openai_embeddings"] = {"status": "ok", "dims": len(resp.data[0].embedding)}
+    except Exception as e:
+        results["openai_embeddings"] = {"status": "error", "detail": str(e)}
+
+    # Test PDF URL
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            resp = client.head(PDF_URL)
+        results["pdf_url"] = {"status": "ok", "http_code": resp.status_code}
+    except Exception as e:
+        results["pdf_url"] = {"status": "error", "detail": str(e)}
+
+    return results
+
+
+@app.get("/logs")
+def get_logs(x_api_key: str = Header(default=""), lines: int = 100):
+    """Retorna los últimos N mensajes de log."""
+    verify_api_key(x_api_key)
+    return {"logs": list(log_buffer)[-lines:]}
 
 
 if __name__ == "__main__":
