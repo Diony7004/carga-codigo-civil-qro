@@ -346,25 +346,39 @@ DO UPDATE SET texto = EXCLUDED.texto, orden = EXCLUDED.orden;
 def get_pg_connection():
     """Connect to PostgreSQL, forcing IPv4 to avoid Docker IPv6 issues."""
     import socket
-    from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+    from urllib.parse import urlparse, unquote
 
-    conn_str = POSTGRES_URL
+    parsed = urlparse(POSTGRES_URL)
+    hostname = parsed.hostname
+    port = parsed.port or 5432
+    dbname = parsed.path.lstrip("/") or "postgres"
+    user = unquote(parsed.username or "postgres")
+    password = unquote(parsed.password or "")
 
-    # Force IPv4: resolve hostname and use hostaddr parameter
+    # Force IPv4 resolution
     try:
-        parsed = urlparse(conn_str)
-        hostname = parsed.hostname
-        if hostname:
-            # Resolve to IPv4 only
-            ipv4 = socket.getaddrinfo(hostname, None, socket.AF_INET)[0][4][0]
-            logger.info(f"PostgreSQL: resolved {hostname} -> {ipv4} (IPv4)")
-            # Rebuild connection string with hostaddr hint via options
-            # psycopg2 accepts hostaddr as a separate param
-            return psycopg2.connect(conn_str, hostaddr=ipv4)
+        ipv4 = socket.getaddrinfo(hostname, None, socket.AF_INET)[0][4][0]
+        logger.info(f"PostgreSQL: {hostname} -> {ipv4} (forced IPv4)")
+        connect_host = ipv4
     except Exception as e:
-        logger.warning(f"IPv4 resolution failed, trying direct: {e}")
+        logger.warning(f"IPv4 resolution failed for {hostname}: {e}")
+        connect_host = hostname
 
-    return psycopg2.connect(conn_str)
+    # Parse SSL mode from query string
+    sslmode = "require"  # Default for Supabase
+    if parsed.query:
+        for param in parsed.query.split("&"):
+            if param.startswith("sslmode="):
+                sslmode = param.split("=")[1]
+
+    return psycopg2.connect(
+        host=connect_host,
+        port=port,
+        dbname=dbname,
+        user=user,
+        password=password,
+        sslmode=sslmode,
+    )
 
 
 def crear_tabla_pg():
