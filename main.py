@@ -44,6 +44,7 @@ POSTGRES_URL = os.environ.get("DATABASE_URL", "")
 QDRANT_URL = os.environ.get("QDRANT_URL", "")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")  # For OpenRouter proxy
 
 QDRANT_COLLECTION = "codigo_civil_queretaro"
 PG_TABLE = "d26_codigo_civil_qro"
@@ -378,7 +379,10 @@ def insertar_chunks_pg(chunks: list[dict]):
 #  PASO 5: Generar embeddings con OpenAI
 # ═══════════════════════════════════════════════════════════════════
 def generar_embeddings(textos: list[str]) -> list[list[float]]:
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client_kwargs = {"api_key": OPENAI_API_KEY}
+    if OPENAI_BASE_URL:
+        client_kwargs["base_url"] = OPENAI_BASE_URL
+    client = OpenAI(**client_kwargs)
     embeddings = []
     # Procesar en sub-batches de 100 (límite de API)
     for i in range(0, len(textos), 100):
