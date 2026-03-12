@@ -344,7 +344,27 @@ DO UPDATE SET texto = EXCLUDED.texto, orden = EXCLUDED.orden;
 
 
 def get_pg_connection():
-    return psycopg2.connect(POSTGRES_URL)
+    """Connect to PostgreSQL, forcing IPv4 to avoid Docker IPv6 issues."""
+    import socket
+    from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+
+    conn_str = POSTGRES_URL
+
+    # Force IPv4: resolve hostname and use hostaddr parameter
+    try:
+        parsed = urlparse(conn_str)
+        hostname = parsed.hostname
+        if hostname:
+            # Resolve to IPv4 only
+            ipv4 = socket.getaddrinfo(hostname, None, socket.AF_INET)[0][4][0]
+            logger.info(f"PostgreSQL: resolved {hostname} -> {ipv4} (IPv4)")
+            # Rebuild connection string with hostaddr hint via options
+            # psycopg2 accepts hostaddr as a separate param
+            return psycopg2.connect(conn_str, hostaddr=ipv4)
+    except Exception as e:
+        logger.warning(f"IPv4 resolution failed, trying direct: {e}")
+
+    return psycopg2.connect(conn_str)
 
 
 def crear_tabla_pg():
